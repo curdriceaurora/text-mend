@@ -1,0 +1,15 @@
+{
+  "name": "reversed-text-normalizer",
+  "version": "1.0.0",
+  "description": "Chrome MV3 extension that detects and normalizes reversed text on webpages.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test",
+    "build:icons": "node tools/gen-icons.mjs"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "jsdom": "^29.1.1"
+  }
+}

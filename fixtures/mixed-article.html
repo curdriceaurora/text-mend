@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Mixed normal/reversed article — manual test fixture</title>
+    <style>body { font: 16px/1.6 Georgia, serif; max-width: 680px; margin: 40px auto; padding: 0 16px; }</style>
+  </head>
+  <body>
+    <h1>Turtle light fight still burns bright</h1>
+    <p>By Adam Van Brimmer</p>
+
+    <!-- normal paragraph: must be left untouched -->
+    <p>Wildlife experts say the nighttime glow disrupts sea turtles during the nesting season.</p>
+
+    <!-- fully character-reversed paragraph, single text node: should auto-apply -->
+    <p>.melborp eht evlos lliw eW</p>
+
+    <!-- word-by-word reversed, single text node: should auto-apply as word reverse -->
+    <p>eW lliw evlos eht melborp.</p>
+
+    <!-- reversed text spanning an inline link: should be routed to PREVIEW, not mutated -->
+    <p>.melborp eht evlos <a href="https://example.com">lliw</a> eW</p>
+
+    <figcaption>Image caption: high mast lights at Exit 42.</figcaption>
+    <figcaption>Image caption: high mast lights at Exit 42.</figcaption>
+
+    <!-- excluded content: code must never be reversed -->
+    <pre><code>const eht = reverse("the");</code></pre>
+  </body>
+</html>

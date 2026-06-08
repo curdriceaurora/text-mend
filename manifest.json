@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "Reversed Text Normalizer",
+  "version": "1.0.0",
+  "description": "Detects and normalizes reversed text on webpages. Local-only, manual invocation.",
+  "permissions": ["activeTab", "scripting", "contextMenus", "storage"],
+  "host_permissions": [],
+  "background": {
+    "service_worker": "src/extension/background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "src/extension/popup.html",
+    "default_title": "Normalize reversed text",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "options_page": "src/extension/options.html",
+  "commands": {
+    "_execute_action": {
+      "suggested_key": { "default": "Ctrl+Shift+Y", "mac": "Command+Shift+Y" },
+      "description": "Open the Normalizer popup"
+    },
+    "normalize-selection": {
+      "suggested_key": { "default": "Ctrl+Shift+U", "mac": "Command+Shift+U" },
+      "description": "Normalize selected reversed text"
+    }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["src/core/*.js", "src/extension/content.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
