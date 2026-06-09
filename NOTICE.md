@@ -1,11 +1,29 @@
 # Third-Party Notices
 
-## Bundled English word list (`src/core/corpus.js`)
+## Bundled English word list (`src/core/corpus-data.js`)
 
-The current corpus is a small, hand-curated list of high-frequency English words
-authored for this project and released under the project's MIT license. It contains
-no domain-specific vocabulary.
+The frequency-ranked word list bundled at `src/core/corpus-data.js` is generated from:
 
-For production, replace it with a larger permissively-licensed frequency list (e.g. a
-public-domain or MIT/CC0 frequency corpus) and document the source, version, and license
-here. The scoring API in `src/core/detect.js` does not change when the corpus is swapped.
+- **hermitdave/FrequencyWords** — <https://github.com/hermitdave/FrequencyWords>
+  The compilation/code is licensed under the **MIT License**.
+- **Upstream data:** the frequency counts derive from the **OpenSubtitles** corpus as
+  distributed by the **OPUS** project (P. Lison & J. Tiedemann, *OpenSubtitles2016*, LREC
+  2016). Only a derived list of common English **words** is bundled here — no subtitle
+  text, lines, or dialogue are included or redistributed. Word frequencies are used solely
+  as a local heuristic signal.
+
+`tools/build-corpus.mjs` fetches the 2018 English list (`en_50k.txt`) **pinned to a specific
+upstream commit** and **verifies it against a known SHA-256** before use, keeps the top
+20,000 alphabetic words (length 2–15) minus a profanity/non-English denylist, and writes
+them as a compact ES module. Regenerate with:
+
+```bash
+npm run build:corpus     # or: node tools/build-corpus.mjs
+```
+
+A small curated supplement in `src/core/corpus.js` adds tool-specific terms (e.g.
+`reversed`, `normalize`) that may fall outside the frequency cut. No article- or
+domain-specific vocabulary is hardcoded; common nouns are present only because the
+frequency list includes them.
+
+The list is used purely for local heuristic scoring; no text ever leaves the browser.

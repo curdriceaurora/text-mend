@@ -9,8 +9,14 @@ import {
 } from '../src/core/detect.js';
 
 test('dictionaryCoverage is ~1 for normal English and ~0 for reversed text', () => {
-  assert.ok(dictionaryCoverage('we will solve the problem') > 0.9);
-  assert.ok(dictionaryCoverage('ew lliw evlos eht melborp') < 0.2);
+  // Normal text is almost entirely in-dictionary; reversed text is mostly non-words.
+  // (A short reversed token can coincidentally be a real word — e.g. "ew" — so we assert
+  // a strong separation, not near-zero.)
+  const normal = dictionaryCoverage('we will solve the problem');
+  const reversed = dictionaryCoverage('ew lliw evlos eht melborp');
+  assert.ok(normal > 0.9, `normal coverage ${normal}`);
+  assert.ok(reversed < 0.35, `reversed coverage ${reversed}`);
+  assert.ok(normal - reversed > 0.6, `separation ${normal - reversed}`);
 });
 
 test('confidence rewards a proposal that is more English than the original', () => {
