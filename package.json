@@ -9,7 +9,8 @@
     "test:e2e": "node --test test/e2e/*.e2e.mjs",
     "test:all": "npm test && npm run test:e2e",
     "build:icons": "node tools/gen-icons.mjs",
-    "build:corpus": "node tools/build-corpus.mjs"
+    "build:corpus": "node tools/build-corpus.mjs",
+    "package": "node tools/build-package.mjs"
   },
   "license": "MIT",
   "devDependencies": {
