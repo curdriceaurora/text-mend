@@ -1,9 +1,9 @@
-# text-reverser
+# Text Mend
 
-**Reversed Text Normalizer** — a Chrome Manifest V3 extension that detects and normalizes
-reversed text on webpages (character-reversed and word-reversed), locally and on manual
-invocation. See [requirements.md](requirements.md) for the full spec and
-[tasks/todo.md](tasks/todo.md) for the implementation checklist.
+**Text Mend** — a Chrome Manifest V3 extension that repairs reversed, mojibake, and garbled
+article text locally and presents a clean reader view. See [requirements.md](requirements.md)
+for the full spec, [docs/store-listing.md](docs/store-listing.md) for store names/subtitles,
+and [tasks/todo.md](tasks/todo.md) for the implementation checklist.
 
 ## Architecture
 

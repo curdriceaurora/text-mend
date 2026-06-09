@@ -1,7 +1,7 @@
 {
-  "name": "reversed-text-normalizer",
+  "name": "text-mend",
   "version": "1.0.0",
-  "description": "Chrome MV3 extension that detects and normalizes reversed text on webpages.",
+  "description": "Text Mend — repair reversed, mojibake, and garbled article text locally in a clean reader view (Chrome MV3).",
   "type": "module",
   "private": true,
   "scripts": {
