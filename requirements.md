@@ -1,8 +1,8 @@
 # Requirements: Reversed Text Normalizer (Chrome Extension)
 
-**Status:** Revised for implementation readiness (incorporates architecture-review corrections).
+**Status:** V1 shipped (in-place reversal normalization). This revision adds the **V1.5 news-reader direction**: a reader view as the primary surface, plus additional deterministic repair candidates.
 **Manifest:** Chrome Manifest V3.
-**Guiding principle:** This is a **deterministic local reversal normalizer**, not a general "fix any broken text" tool. OCR/extraction/contextual repair is preview-or-copy only and never silently mutates the page.
+**Guiding principle:** This is a **deterministic local text-repair tool for news articles** — reversal normalization first, with other mechanical repairs (mojibake, hard-wrap, invisible characters) added as candidates on the same pipeline. It is not a general "fix any broken text" tool: probabilistic OCR/contextual repair is preview-or-copy only and never silently mutates the page.
 
 ---
 
@@ -14,6 +14,12 @@ It must preserve page structure, formatting, links, captions, headings, and alre
 
 Primary case: a page where some paragraphs are readable and others are character-reversed, e.g. `levart ot hguorht driht eht...`, converted without damaging surrounding content.
 
+### 1.0 Primary use case: news articles ("reader mode, but a bit more")
+
+The product is aimed at **news-article reading**: paywalled-article extracts, wire-service syndication, web archives, and CMS-migrated pages — the places where text corruption (reversal, mojibake, lost line breaks) actually occurs. The positioning is *reader mode plus repair*: extract the article like a reader mode would, but run the deterministic repair pipeline on the text as it is extracted.
+
+This drives a key architectural decision for V1.5: the **reader view becomes the primary surface** (§5.21). Rendering extracted-and-repaired text into an extension-controlled view sidesteps the §5.5 in-place mutation constraints entirely — there are no foreign inline elements to preserve in a surface we own. In-place mutation remains as the secondary, quick-fix path; the constraints in §5.5 continue to govern it unchanged.
+
 ### 1.1 Scope of the corruption model (critical)
 
 The extension handles **deterministic reversal** only:
@@ -24,9 +30,13 @@ The extension handles **deterministic reversal** only:
 | Word-by-word reversed text (order correct) | Supported (in-place where safe) |
 | Mixed normal/reversed paragraphs | Supported via segmentation |
 | Reversed text split across simple spans | Supported in-place only if boundaries preserve safely; else preview |
-| Reversed text spanning links/inline formatting | **Preview/copy only** in V1 (no auto in-place mutation) |
+| Reversed text spanning links/inline formatting | **Preview/copy only** in V1 (no auto in-place mutation); fully repaired in reader view (V1.5) |
+| Mojibake (encoding double-decode: `â€™`→`’`, `Ã©`→`é`) | **V1.5** — deterministic candidate |
+| Hard-wrap / hyphenation artifacts (`exten-` + newline + `sion`) | **V1.5** — deterministic candidate |
+| Zero-width / invisible characters (ZWSP, soft hyphen, directional marks) | **V1.5** — deterministic strip |
+| Smart-quote / dash / ellipsis canonicalization | **V1.5** — copy/export normalization |
 | OCR-mangled article text | **Detection + preview only** |
-| Contextual reconstruction (missing words, scrambled order) | **Out of scope** for deterministic V1 |
+| Contextual reconstruction (missing words, scrambled order) | **Out of scope** (deterministic pipeline) |
 
 The extension must **not** promise to reconstruct mangled prose automatically. Assisted/contextual repair, if added later, is an explicit opt-in preview workflow with user confirmation.
 
@@ -51,6 +61,7 @@ The extension must **not** promise to reconstruct mangled prose automatically. A
 5. Modifying server-side content or permanently altering page source.
 6. Contextual reconstruction of OCR-mangled prose (preview-only at most).
 7. Non-English reversal detection (disabled unless a language pack is enabled).
+8. Forum/technical-page repairs that don't serve news reading: ROT13/cipher decoding, leetspeak/homoglyph folding, deeper shadow-DOM/iframe traversal, richer code-block handling. Existing exclusions stay; no further investment.
 
 ---
 
@@ -112,7 +123,7 @@ Rules:
 
 Activation methods: toolbar button, right-click context menu (on selection), keyboard shortcut.
 
-Toolbar actions: Scan page · Normalize page · Normalize visible content · Normalize selection · Preview fixes · Undo changes · Copy cleaned text · Settings.
+Toolbar actions: **Open reader view** *(V1.5 — primary action)* · Scan page · Normalize page · Normalize visible content · Normalize selection · Preview fixes · Undo changes · Copy cleaned text · Settings.
 
 ### 5.2 Reversed Text Detection
 
@@ -187,6 +198,19 @@ OCR/extraction-mangled text: normalize obvious reversed words, leave uncertain p
 
 The transformation mode (full vs. token vs. hybrid) is chosen by comparing the scores of each candidate form (§5.19).
 
+#### 5.4.5 V1.5 Repair Candidates (deterministic)
+Each is a new candidate generator plugged into the §5.19 flow. **The §5.3.6 confidence formula governs reversal candidates only** — its `reversedCommonTokenScore` term is reversal-specific and would systematically under-score other repairs. Non-reversal candidates use the candidate-specific gates defined below; all of them share the tier routing (high → apply, medium → preview, low → ignore) and the §6.6 false-positive bar.
+
+1. **Mojibake repair** (`mode: 'mojibake'`): reverse common UTF-8-decoded-as-Latin-1 double-decode artifacts via a fixed mapping table (`â€™`→`’`, `â€œ`/`â€`→`“`/`”`, `â€"`→`—`, `Ã©`→`é`, `Ã¨`→`è`, etc.). The mapping contains bidirectionally unambiguous entries only.
+   *Gate:* applies only when the segment contains ≥1 mapped sequence. *Tier:* **high** when every artifact in the segment maps and the proposal's dictionary coverage (§5.3.1) is ≥ the original's; **medium** (preview) otherwise.
+2. **Hard-wrap repair** (`mode: 'unwrap'`): join mid-sentence single line breaks (lowercase or comma before break, lowercase after) and re-join hyphenation splits (`exten-\nsion` → `extension` **only when** the joined form is a dictionary word and the hyphenated form is not a known compound). Double newlines (paragraph breaks) are always preserved.
+   *Gate:* each individual join must satisfy its rule; joins that don't validate are left as-is. *Tier:* **high** only when every hyphenation join is dictionary-validated; **medium** (preview) when any join relies on the line-break heuristic alone.
+3. **Invisible-character strip** (`mode: 'strip'`): remove ZWSP (U+200B), ZWNJ/ZWJ when not joining complex scripts, soft hyphen (U+00AD), and stray directional marks (U+200E/U+200F) outside BiDi contexts.
+   *Gate:* target characters present outside protected contexts. *Tier:* **high** by construction (pure deletion of zero-width characters; rendered text is unchanged) — may auto-apply.
+4. **Punctuation canonicalization** (`mode: 'punct'`, **copy/export only**): `--` to em dash, `...` to ellipsis, straighten-or-curl quotes per a user setting. Not scored and **never applied to any rendered surface — in-page or reader view (§5.21)** — because it is stylistic preference, not corruption repair; it transforms copy/export output only. (This is the one explicit exception to reader view's "all repairs apply" in §5.21.)
+
+Candidates compose: a segment may be mojibake-repaired and then unwrapped. Composition order is fixed — **strip → mojibake → unwrap** as a gated pre-repair pass, then the reversal candidates of §5.4.1–5.4.2 are scored on the pre-repaired text (see §5.19 step 4). A composed proposal reports all modes applied (e.g. `['strip','mojibake','full']`); its tier is the **lowest** among its components, so one preview-tier component routes the whole composition to preview.
+
 ### 5.5 DOM Handling
 1. Traverse text nodes with `TreeWalker`.
 2. Skip hidden / `script` / `style` / `template` / `noscript` / `textarea` nodes.
@@ -199,7 +223,7 @@ The transformation mode (full vs. token vs. hybrid) is chosen by comparing the s
 - Single text-node blocks → may normalize in place.
 - In-node word-level reversal → may normalize in place.
 - Multi-node full-block reversal → **preview only** (and copy-as-cleaned-text).
-- In-place mutation across links or styled spans → **requires explicit user confirmation**; default is preview/copy.
+- In-place mutation across links or styled spans → **not supported** (deferred indefinitely, §9). These segments are routed to preview/copy in the in-page flow and are fully repaired only in reader view (§5.21), which renders into an owned surface with no foreign inline elements to preserve. This matches shipped V1 behavior, which never mutates across nodes.
 
 ### 5.6 Undo and Revert
 1. Store original text per modified text node.
@@ -217,7 +241,15 @@ Columns: Location (readable section label/path) · Confidence (high/medium/low) 
 Actions: apply all high-confidence · apply selected · ignore selected · edit proposed text · copy proposed · export cleaned article. Large result sets are virtualized.
 
 ### 5.8 Clean Article Extraction
-Preserve title, byline, section headings, body paragraph order, image captions. Optionally remove duplicate captions. Exclude nav/ads/cookie banners/widgets where possible. Plain text default; Markdown export optional:
+Preserve title, byline, section headings, body paragraph order, image captions. Optionally remove duplicate captions. Exclude nav/ads/cookie banners/widgets where possible. Plain text default; Markdown export optional.
+
+**V1.5 news-extraction upgrades** (extraction quality is what users judge a reader product on, before any repair runs):
+1. **Container scoring (Readability-style):** identify the main article container by scoring candidates on text density, paragraph count, and link density — replacing V1's flat `h1,h2,h3,p,figcaption,li` page-wide query, which pulls nav junk and misses `article`-scoped content.
+2. **Byline/dateline normalization:** parse "By JANE DOE | Updated 3:42 p.m. ET, June 8" patterns into a structured byline and an absolute date.
+3. **Photo-credit handling:** optionally strip agency credits ("(AP Photo/…)", "Getty Images") from captions on copy/export.
+4. **News boilerplate exclusion list:** "Related stories", "Read more:", newsletter sign-up blocks, "Advertisement" markers, share-button text, live-blog timestamps, syndication footers.
+5. **Pull-quote dedup:** pull quotes repeat body sentences — drop them on copy/export, same mechanism as caption dedup (§5.9).
+6. **Multi-page / live-blog stitching** (stretch): concatenate paginated article parts into one cleaned document.
 ```markdown
 # Article Title
 By Author Name
@@ -234,11 +266,11 @@ Setting "Remove duplicate paragraphs when copying cleaned text": default **on** 
 
 ### 5.10 User Interface
 
-**5.10.1 Toolbar popup** — page scan status; counts of reversed segments / high-confidence / medium-confidence fixes; buttons: Scan, Normalize Page, Preview Fixes, Normalize Selection, Copy Cleaned Text, Undo, Settings. (Primary actions and status only — detailed review happens in the side panel.)
+**5.10.1 Toolbar popup** — page scan status; counts of reversed segments / high-confidence / medium-confidence fixes; buttons: **Open Reader View** *(V1.5 — listed first; the primary surface)*, Scan, Normalize Page, Preview Fixes, Normalize Selection, Copy Cleaned Text, Undo, Settings. (Primary actions and status only — detailed review happens in the side panel.)
 
 **5.10.2 Inline highlighting** — high = green outline, medium = amber, low = gray; removable; must not rely on color alone (also use an icon/label, see §5.15).
 
-**5.10.3 Context menu** — Normalize reversed text · Copy normalized text · Preview normalized text.
+**5.10.3 Context menu** — Normalize reversed text · Copy normalized text · Preview normalized text · **Open in reader view** *(V1.5; page context, not only selection)*.
 
 ### 5.11 Settings
 | Setting | Default | Description |
@@ -290,7 +322,9 @@ If Chrome cannot assign it, surface instructions to set it manually at `chrome:/
 Mixed normal/reversed paragraphs · mixed sentences within a paragraph (requires sentence segmentation, §5.19) · reversed quotes/apostrophes/smart-quotes/em-dashes · reversed names/numbers/dates · duplicated captions · text split across spans · lazy-loaded sections · shadow DOM where accessible · same-origin iframes · cross-origin iframes (access restricted — skip) · infinite scroll · reader-mode pages · CMS hidden text · copy-protected pages · CSS `rtl`/bidi contexts (skip) · non-English (disabled unless language pack).
 
 ### 5.19 Detection/Transformation Flow
-1. User activates scan. 2. Content script collects candidate text nodes. 3. Group into logical blocks; segment paragraphs into sentences where mixed content is possible. 4. Score each segment in three forms — original, full-string-reversed, word-by-word-reversed — using §5.3. 5. Select best-scoring form. 6. High confidence + in-place-safe → mark fixable. 7. Medium, or any multi-node/linked block → preview. 8. Low → ignore. 9. User applies. 10. Store undo state. 11. Replace only affected text nodes. 12. Optionally generate cleaned article output.
+1. User activates scan. 2. Content script collects candidate text nodes. 3. Group into logical blocks; segment paragraphs into sentences where mixed content is possible. 4. **Generate candidate proposals for each segment:** first the gated V1.5 pre-repair pass (strip → mojibake → unwrap, §5.4.5) produces a pre-repaired base; then the reversal forms — original, full-string-reversed, word-by-word-reversed — are scored on that base with the §5.3.6 formula. Each non-reversal repair contributes its own candidate, accepted/tiered by its §5.4.5 gate rather than the reversal formula. 5. Select the highest-tier proposal (ties broken by §5.3.6 confidence among reversal candidates); a composed proposal carries the lowest tier of its components. 6. High confidence + in-place-safe → mark fixable. 7. Medium, or any multi-node/linked block → preview. 8. Low → ignore. 9. User applies. 10. Store undo state. 11. Replace only affected text nodes. 12. Optionally generate cleaned article output.
+
+*(In reader view (§5.21) steps 6–7 don't gate on in-place safety — every applicable repair is rendered into the owned surface; only punctuation canonicalization (§5.4.5 item 4) stays export-only.)*
 
 ### 5.20 Manifest V3
 ```json
@@ -317,6 +351,19 @@ Mixed normal/reversed paragraphs · mixed sentences within a paragraph (requires
 }
 ```
 
+### 5.21 Reader View (V1.5 — primary surface)
+
+A full-page, extension-controlled reading view: extract the article (§5.8), run every applicable deterministic repair (§5.4), and render the result. Because the surface is owned by the extension, **all** repairs apply — including segments that span links/inline formatting, which V1 could only preview (§5.5 keeps governing the in-place path, unchanged).
+
+Requirements:
+1. Opens from the popup ("Open reader view") and the context menu; rendered as an extension page or full-page overlay — never by destroying the original DOM (original tab content is untouched underneath).
+2. Preserves article structure: title, normalized byline/date, headings, paragraphs, images with captions, links (re-rendered with repaired anchor text, `rel="noopener"`).
+3. Repair transparency: segments that were repaired are subtly marked; hovering (or a toggle) shows the original text. A **side-by-side original/repaired diff view** is the V2 extension of this.
+4. Typography controls: font size, line width, light/dark/sepia theme; estimated read time in the header.
+5. Copy/export (plain, Markdown) operates on the reader-view content — same output as §5.8.
+6. All processing remains local (§5.12); the reader view introduces no new permissions and no remote fetches.
+7. Keyboard accessible and screen-reader navigable (§5.14 applies).
+
 ---
 
 ## 6. Test Requirements
@@ -332,6 +379,8 @@ Static article · article with images/captions · duplicated captions · inline 
 
 ### 6.4 Regression Fixtures
 Normal-only · reversed-only · mixed · **OCR-mangled reversed text (real, not clean reversal)** · news article with headings/byline/captions/body · 100+ paragraph article · article with dates/names/locations · article with code snippets that must not be reversed · **Unicode fixtures: emoji, combining marks, smart quotes, em dashes, accented characters, mixed punctuation**.
+
+**V1.5 fixtures:** mojibake-corrupted article (real double-decode artifacts) · PDF-extracted article with hard-wrapped lines and hyphenation splits · article with zero-width characters injected · real news pages for extraction scoring (nav-heavy layout, `article`-scoped content, live blog, paginated) · byline/dateline format corpus. The false-positive bar (§6.6) extends to every new candidate: mojibake/unwrap/strip must produce **zero** changes on the clean-article corpus.
 
 ### 6.5 Acceptance Examples
 Clean reversal:
@@ -367,6 +416,9 @@ Define a **measurable false-positive bar**: e.g. ≤ N false reversals across th
 | `sidePanel.tsx` | Injected preview/diff/apply UI |
 | `settings.ts` | Preferences (versioned schema) |
 | `fixtures/` | Test fixture suite |
+| `mojibake.js` *(V1.5)* | Double-decode artifact repair candidate |
+| `unwrap.js` *(V1.5)* | Hard-wrap / hyphenation repair candidate |
+| `readerView/` *(V1.5)* | Reader-view page: render, repair marks, typography controls |
 
 ---
 
@@ -384,15 +436,38 @@ Define a **measurable false-positive bar**: e.g. ≤ N false reversals across th
 11. Unit + integration + regression suites pass.
 12. Chrome Web Store privacy disclosure complete.
 
+## 8.5 Release Criteria (V1.5 — news reader)
+1. **Entry points:** reader view opens from both the toolbar popup and the context menu (§5.10) and renders without destroying the original tab's DOM.
+2. **Extraction quality:** on the news-extraction fixture set (§6.4), container scoring selects the article body with no nav/ads/boilerplate in the output and no dropped body paragraphs; byline/date normalized where present.
+3. **Repair coverage in reader view:** reversal, strip, mojibake, and unwrap candidates all apply in the reader surface — including segments that span links (which the in-page flow can only preview).
+4. **Repair transparency:** repaired segments are marked and the original text is retrievable (hover/toggle).
+5. **Punctuation scope:** punctuation canonicalization changes copy/export output only — never the in-page DOM or the rendered reader view.
+6. **Copy/export parity:** plain and Markdown output from reader view matches §5.8 and equals the in-page "copy cleaned text" output for the same article.
+7. **False-positive gates:** each new candidate (strip/mojibake/unwrap) produces **zero** changes across the clean-article corpus (§6.6); per-candidate gates (§5.4.5) verified by fixtures.
+8. **Local-only:** reader view adds no new permissions and makes no remote fetches (§5.12).
+9. **Accessibility:** reader view is keyboard-navigable and screen-reader friendly (§5.14).
+10. Unit + integration + regression suites (incl. V1.5 fixtures, §6.4) pass.
+
 ---
 
-## 9. V1 Scope Summary
+## 9. Scope and Roadmap
 
-**In:** manual page scan · selection normalize (context menu) · same-session observer after activation · grapheme-safe full-string reverse · punctuation-aware token reverse · defined confidence scoring · injected side-panel preview · per-operation undo · copy cleaned text · local-only processing.
+**V1 (shipped):** manual page scan · selection normalize (context menu) · same-session observer after activation · grapheme-safe full-string reverse · punctuation-aware token reverse · defined confidence scoring · injected side-panel preview · per-operation undo · copy cleaned text · local-only processing.
 
-**Out / deferred:** per-site auto mode · page-load auto-run · broad host permissions · in-place mutation across links/spans · OCR/contextual reconstruction · LLM-based repair · non-English detection · PDF/image OCR.
+**V1.5 (news reader):**
+1. Reader view as primary surface (§5.21) — the highest-priority item; unlocks full repair of link-spanning segments.
+2. Readability-style container scoring + news-extraction upgrades (§5.8) — the biggest extraction-quality lever; build before or with the reader view.
+3. Deterministic repair candidates: invisible-character strip, mojibake, hard-wrap repair (§5.4.5), in that order (ascending false-positive risk).
+4. Punctuation canonicalization on copy/export.
+5. V1.5 fixtures + extended false-positive bar (§6.4, §6.6).
+
+**V2:** side-by-side original/repaired diff view · multi-page/live-blog stitching · site-specific extraction rules · user-correction memory (`storage.local`).
+
+**Out / deferred indefinitely:** per-site auto mode · page-load auto-run · broad host permissions · in-place mutation across links/spans (superseded by reader view) · OCR/contextual reconstruction · LLM-based repair · non-English detection · PDF/image OCR · cipher/leetspeak repairs (§2.2.8).
 
 ---
 
 ## 10. Future Enhancements
-Firefox/Edge support (reinstate `Array.from` reversal fallback then) · optional local language-model scoring · additional languages · PDF text-layer support · image/screenshot OCR · reader-mode cleaned view · site-specific rules · user-correction memory (`storage.local`) · batch processing of saved HTML · side-by-side original/cleaned reading mode.
+Firefox/Edge support (reinstate `Array.from` reversal fallback then) · optional local language-model scoring · additional languages · PDF text-layer support · image/screenshot OCR · batch processing of saved HTML.
+
+*(Promoted out of this list: reader view → V1.5 §5.21; diff view, site-specific rules, user-correction memory → V2 §9.)*
