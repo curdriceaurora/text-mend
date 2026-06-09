@@ -5,15 +5,32 @@
 import { createDomNormalizer } from './dom-normalize.js';
 import { loadSettings } from './settings.js';
 import { canonicalizePunctuation } from '../core/punct.js';
+import { createCorrectionsStore } from './corrections-store.js';
+import { keyFor, makeOverride, makeSuppress } from '../core/corrections.js';
 
 const normalizer = createDomNormalizer({ window });
+const corrections = createCorrectionsStore();
 let observer = null;
+let captureEnabled = true; // mirrors settings.rememberCorrections; updated per scan
 
 const getSettings = loadSettings;
 
+// Load stored corrections only when the feature is on; otherwise an empty map ⇒ no replay.
+async function loadRecords(settings) {
+  if (!settings.rememberCorrections) return {};
+  try {
+    return await corrections.loadRecords();
+  } catch {
+    return {};
+  }
+}
+
 async function runScan({ apply, renderPanel = true }) {
   const settings = await getSettings();
-  const res = normalizer.scan({ apply, settings });
+  captureEnabled = settings.rememberCorrections;
+  const records = await loadRecords(settings);
+  const res = normalizer.scan({ apply, settings, records });
+  if (captureEnabled && res.replayedKeys.length) corrections.bump(res.replayedKeys, Date.now());
   if (renderPanel) renderPreview(res.preview);
   if (apply) ensureObserver();
   return { applied: res.applied, preview: res.preview.length, total: res.total };
@@ -21,19 +38,23 @@ async function runScan({ apply, renderPanel = true }) {
 
 async function runSelection() {
   const settings = await getSettings();
-  const res = normalizer.normalizeSelection(window.getSelection(), {
-    threshold: settings.threshold,
-    minLength: settings.minLength,
-  });
+  const records = await loadRecords(settings);
+  const res = normalizer.normalizeSelection(
+    window.getSelection(),
+    { threshold: settings.threshold, minLength: settings.minLength },
+    records,
+  );
   if (res.copied) navigator.clipboard?.writeText(res.copied).catch(() => {});
+  if (settings.rememberCorrections && res.correctionKey) corrections.bump([res.correctionKey], Date.now());
   return res;
 }
 
 async function runCopyCleaned() {
   const settings = await getSettings();
+  const records = await loadRecords(settings);
   // Punctuation canonicalization is export-only (§5.4.5 item 4): applied to copied text,
-  // never to the in-page DOM.
-  const text = canonicalizePunctuation(normalizer.extractCleanedText(settings));
+  // never to the in-page DOM. Records make copied text honor stored suppress/override.
+  const text = canonicalizePunctuation(normalizer.extractCleanedText(settings, records));
   await navigator.clipboard?.writeText(text);
   return { copied: text.length };
 }
@@ -84,6 +105,15 @@ async function handle(message) {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   handle(message).then(sendResponse, (err) => sendResponse({ ok: false, error: String(err) }));
   return true; // keep the message channel open for the async response
+});
+
+// Reflect a settings toggle immediately on an already-open page: if correction memory is
+// turned off, drop the review panel so its (now stale) capture controls can't be used.
+chrome.storage?.onChanged?.addListener((changes, area) => {
+  if (area === 'sync' && changes.rememberCorrections) {
+    captureEnabled = changes.rememberCorrections.newValue;
+    if (!captureEnabled) dismissPreview();
+  }
 });
 
 // --- Review panel (injected, shadow-DOM isolated; text set via textContent only) ---
@@ -150,24 +180,74 @@ function renderPreview(items) {
       ? `${item.decision.tier} confidence · ${item.decision.mode} reverse`
       : `${item.decision.tier} confidence · spans links/inline — copy only`;
 
+    // Apply a chosen text to the page: in place when single-node, else copy (link-spanning
+    // can't mutate in place). Used by Apply and the override-capture actions.
+    const applyToPage = (text) => {
+      if (item.singleNode) normalizer.applyDecision(item.node, { proposed: text });
+      else navigator.clipboard?.writeText(text).catch(() => {});
+    };
+    // Persist a record; returns the adapter result. A null record means it exceeded the
+    // byte caps (makeOverride/makeSuppress returned null) — reported, not silently dropped.
+    const persist = async (record) =>
+      record ? corrections.saveRecord(keyFor(item.text), record) : { ok: false, error: 'too long to remember' };
+
     const btn = document.createElement('button');
-    if (item.singleNode) {
-      // In-place-safe: rewrite the single text node directly.
-      btn.textContent = 'Apply';
-      btn.addEventListener('click', () => {
-        normalizer.applyDecision(item.node, item.decision);
+    btn.textContent = item.singleNode ? 'Apply' : 'Copy fixed text';
+    btn.addEventListener('click', () => {
+      applyToPage(item.decision.proposed);
+      if (!item.singleNode) btn.textContent = 'Copied';
+      else row.remove();
+    });
+    row.append(orig, prop, tier, btn);
+
+    if (captureEnabled) {
+      // Capture controls: edit (override), pin the proposal (override), or suppress.
+      const edit = document.createElement('input');
+      edit.type = 'text';
+      edit.value = item.decision.proposed;
+      edit.setAttribute('aria-label', 'Edit the fix');
+
+      const status = document.createElement('span');
+      status.className = 'tier';
+      status.setAttribute('role', 'status');
+
+      // The current-page effect happens regardless of persistence (spec: "the in-page repair
+      // still happens for this visit"). Persistence is best-effort: on success remove the row;
+      // on failure (over cap / quota / memory turned off) keep the row and say so.
+      const capture = async (record, applyText) => {
+        if (applyText !== undefined) applyToPage(applyText);
+        if (!captureEnabled) {
+          status.textContent = 'Memory is off — not remembered';
+          return;
+        }
+        const res = await persist(record);
+        if (!res.ok) {
+          status.textContent = `Applied, not remembered: ${res.error}`;
+          return;
+        }
         row.remove();
-      });
-    } else {
-      // Multi-node/linked: never mutate in place in V1 — offer the corrected text.
-      btn.textContent = 'Copy fixed text';
-      btn.addEventListener('click', () => {
-        navigator.clipboard?.writeText(item.decision.proposed).catch(() => {});
-        btn.textContent = 'Copied';
-      });
+      };
+
+      const save = document.createElement('button');
+      save.textContent = 'Save fix';
+      save.addEventListener('click', () => capture(makeOverride(item.text, edit.value, Date.now()), edit.value));
+
+      const pin = document.createElement('button');
+      pin.textContent = 'Always fix this';
+      pin.addEventListener('click', () =>
+        capture(makeOverride(item.text, item.decision.proposed, Date.now()), item.decision.proposed),
+      );
+
+      const ignore = document.createElement('button');
+      ignore.textContent = 'Ignore — don’t repair again';
+      // Suppress: segment is already shown un-repaired, so nothing to apply on success.
+      ignore.addEventListener('click', () => capture(makeSuppress(item.text, Date.now()), undefined));
+
+      const captureRow = document.createElement('div');
+      captureRow.append(edit, save, pin, ignore, status);
+      row.appendChild(captureRow);
     }
 
-    row.append(orig, prop, tier, btn);
     panel.appendChild(row);
   }
 

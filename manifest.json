@@ -42,7 +42,8 @@
         "src/core/*.js",
         "src/extension/content.js",
         "src/extension/dom-normalize.js",
-        "src/extension/settings.js"
+        "src/extension/settings.js",
+        "src/extension/corrections-store.js"
       ],
       "matches": ["<all_urls>"]
     }

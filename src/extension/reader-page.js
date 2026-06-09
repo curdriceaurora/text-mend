@@ -5,18 +5,28 @@
 import { buildReaderArticle } from './reader.js';
 import { toPlainText, toMarkdown } from '../core/extract.js';
 import { canonicalizePunctuation } from '../core/punct.js';
+import { createCorrectionsStore } from './corrections-store.js';
+import { keyFor, makeOverride, makeSuppress } from '../core/corrections.js';
+import { loadSettings } from './settings.js';
 
 const params = new URLSearchParams(location.search);
 const key = params.get('key');
 
+const corrections = createCorrectionsStore();
 const themes = ['light', 'sepia', 'dark'];
 let themeIdx = 0;
 let fontSize = 19;
 let showMarks = true;
+let captureEnabled = true;
 let article = null;
 
 function setText(el, text) {
   el.textContent = text;
+}
+
+function setStatus(text) {
+  const el = document.getElementById('status');
+  if (el) el.textContent = text;
 }
 
 function blockEl(block) {
@@ -30,11 +40,67 @@ function blockEl(block) {
     setText(mark, block.text);
     mark.title = `Original: ${block.original}\nRepaired via: ${block.modes.join(' → ')}`;
     mark.setAttribute('aria-label', `Repaired text. Original: ${block.original}`);
+    if (captureEnabled) {
+      mark.style.cursor = 'pointer';
+      mark.addEventListener('click', () => openEditor(block, el));
+    }
     el.appendChild(mark);
   } else {
     setText(el, block.text);
   }
   return el;
+}
+
+// Inline correction editor for a repaired block (spec §7). Immediate current-page effect:
+// Save edit → block shows the new text; Don't repair → reverts to original now. Persists.
+function openEditor(block, blockEl) {
+  blockEl.replaceChildren();
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = block.text;
+  input.setAttribute('aria-label', 'Edit the repaired text');
+  input.style.cssText = 'width:100%;font:inherit;';
+
+  // The current-page effect always happens (spec: "the in-page repair still happens for this
+  // visit"); persistence is best-effort and reported via the toolbar status, which survives
+  // the re-render (render() only rebuilds #article, not the toolbar).
+  async function commit(record, mutate) {
+    mutate();
+    render();
+    if (!captureEnabled) {
+      setStatus('Memory is off — not remembered');
+      return;
+    }
+    const res = record ? await corrections.saveRecord(keyFor(block.original), record) : { ok: false, error: 'too long to remember' };
+    setStatus(res.ok ? '' : `Not remembered: ${res.error}`);
+  }
+
+  const save = document.createElement('button');
+  save.textContent = 'Save edit';
+  save.addEventListener('click', () =>
+    commit(makeOverride(block.original, input.value, Date.now()), () => {
+      block.text = input.value;
+      block.changed = true;
+      block.modes = ['override'];
+    }),
+  );
+
+  const suppress = document.createElement('button');
+  suppress.textContent = "Don't repair this";
+  suppress.addEventListener('click', () =>
+    commit(makeSuppress(block.original, Date.now()), () => {
+      block.text = block.original; // revert to original now
+      block.changed = false;
+      block.modes = [];
+    }),
+  );
+
+  const cancel = document.createElement('button');
+  cancel.textContent = 'Dismiss';
+  cancel.addEventListener('click', render);
+
+  blockEl.append(input, save, suppress, cancel);
+  input.focus();
 }
 
 function render() {
@@ -120,9 +186,29 @@ async function init() {
   } catch {
     html = '';
   }
+  const settings = await loadSettings();
+  captureEnabled = settings.rememberCorrections;
+  let records = {};
+  if (captureEnabled) {
+    try {
+      records = await corrections.loadRecords();
+    } catch {
+      records = {};
+    }
+  }
   const doc = new DOMParser().parseFromString(html, 'text/html');
-  article = buildReaderArticle(doc);
+  article = buildReaderArticle(doc, { records });
+  if (captureEnabled && article.replayedKeys.length) corrections.bump(article.replayedKeys, Date.now());
   render();
 }
+
+// Reflect a settings toggle immediately: if memory is turned off while the reader is open,
+// re-render so repaired marks stop being editable capture points.
+chrome.storage?.onChanged?.addListener((changes, area) => {
+  if (area === 'sync' && changes.rememberCorrections) {
+    captureEnabled = changes.rememberCorrections.newValue;
+    render();
+  }
+});
 
 init();

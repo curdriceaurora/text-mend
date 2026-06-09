@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import puppeteer from 'puppeteer-core';
+import { keyFor, normalizeForKey, makeOverride, makeSuppress } from '../../src/core/corrections.js';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const CHROME =
@@ -132,5 +133,100 @@ test('reader view does not canonicalize punctuation in the rendered surface', as
   const body = await page.$eval('main', (el) => el.textContent);
   assert.match(body, /--/, 'double dash preserved in reader (canonicalization is export-only)');
   assert.match(body, /\.\.\./, 'triple dot preserved in reader');
+  await page.close();
+});
+
+test('correction memory replays an override + suppress from real storage.local and bumps lastUsedAt', async () => {
+  const overrideOrig = 'eW lliw evlos eht melborp.'; // detector would repair → "We will solve the problem."
+  const suppressOrig = '.melborp eht evlos lliw eW'; // detector would repair too
+  const k1 = keyFor(overrideOrig);
+  const k2 = keyFor(suppressOrig);
+
+  // Seed real storage.local the way the capture UI would (prefixed keys, old lastUsedAt=1).
+  await worker.evaluate(
+    async (rows) => chrome.storage.local.set(rows),
+    {
+      [`corr:v1:${k1}`]: makeOverride(normalizeForKey(overrideOrig), 'OVERRIDDEN TEXT HERE', 1),
+      [`corr:v1:${k2}`]: makeSuppress(normalizeForKey(suppressOrig), 1),
+    },
+  );
+
+  const key = 'reader-e2e-3';
+  const html = `<article><h1>Memory</h1><p>${overrideOrig}</p><p>${suppressOrig}</p></article>`;
+  await worker.evaluate(
+    async (kk, h) => chrome.storage.session.set({ [kk]: { html: h, url: 'https://example.test/c' } }),
+    key,
+    html,
+  );
+
+  const page = await browser.newPage();
+  await page.goto(`chrome-extension://${extId}/src/extension/reader.html?key=${key}`, { waitUntil: 'load' });
+  await page.waitForSelector('main p', { timeout: 10000 });
+  const body = await page.$eval('main', (el) => el.textContent);
+
+  assert.match(body, /OVERRIDDEN TEXT HERE/, 'override replay rendered');
+  assert.ok(body.includes(suppressOrig), 'suppressed paragraph left at original (reversed)');
+  assert.doesNotMatch(body, /We will solve the problem\./, 'neither paragraph auto-repaired');
+
+  // lastUsedAt bumped after replay (best-effort write; poll briefly).
+  let bumped = false;
+  for (let i = 0; i < 20 && !bumped; i++) {
+    const rec = await worker.evaluate(async (kk) => (await chrome.storage.local.get(kk))[kk], `corr:v1:${k1}`);
+    if (rec && rec.lastUsedAt > 1) bumped = true;
+    else await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.ok(bumped, 'lastUsedAt advanced after replay');
+  await page.close();
+});
+
+test('reader capture: "Don\'t repair this" reverts the text and persists a suppress', async () => {
+  // Clear any prior corrections so this segment starts un-suppressed.
+  await worker.evaluate(async () => {
+    const all = await chrome.storage.local.get(null);
+    const keys = Object.keys(all).filter((k) => k.startsWith('corr:v1:'));
+    if (keys.length) await chrome.storage.local.remove(keys);
+  });
+
+  const original = '.melborp eht evlos lliw eW';
+  const key = 'reader-e2e-4';
+  await worker.evaluate(
+    async (kk, h) => chrome.storage.session.set({ [kk]: { html: h, url: 'https://example.test/d' } }),
+    key,
+    `<article><h1>Capture</h1><p>${original}</p></article>`,
+  );
+
+  const page = await browser.newPage();
+  await page.goto(`chrome-extension://${extId}/src/extension/reader.html?key=${key}`, { waitUntil: 'load' });
+  await page.waitForSelector('mark.repaired', { timeout: 10000 });
+
+  // It was auto-repaired on load; open the editor and choose "Don't repair this".
+  assert.match(await page.$eval('main', (el) => el.textContent), /We will solve the problem\./);
+  await page.click('mark.repaired');
+  await page.waitForSelector('main button');
+  const buttons = await page.$$('main button');
+  for (const b of buttons) {
+    const label = await b.evaluate((el) => el.textContent);
+    if (/Don't repair/.test(label)) {
+      await b.click();
+      break;
+    }
+  }
+
+  // The text reverts to the original now, and a suppress record is persisted.
+  await page.waitForFunction((orig) => document.querySelector('main').textContent.includes(orig), {}, original);
+  const body = await page.$eval('main', (el) => el.textContent);
+  assert.ok(body.includes(original), 'reverted to original after suppress');
+  assert.doesNotMatch(body, /We will solve the problem\./, 'no longer repaired');
+
+  let stored = false;
+  for (let i = 0; i < 20 && !stored; i++) {
+    const n = await worker.evaluate(async () => {
+      const all = await chrome.storage.local.get(null);
+      return Object.keys(all).filter((k) => k.startsWith('corr:v1:')).length;
+    });
+    if (n >= 1) stored = true;
+    else await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.ok(stored, 'a suppress record was persisted to storage.local');
   await page.close();
 });

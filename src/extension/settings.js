@@ -1,7 +1,7 @@
 // Single source of truth for user settings (requirements §5.11). Imported by the options
 // page, the content script, and the DOM adapter so defaults can't drift between them.
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2; // v2: added rememberCorrections
 
 export const SETTINGS_DEFAULTS = {
   version: SCHEMA_VERSION,
@@ -10,6 +10,7 @@ export const SETTINGS_DEFAULTS = {
   threshold: 0.75,
   minLength: 20,
   maxNodes: 10000,
+  rememberCorrections: true, // V2 correction memory; local-only
 };
 
 /** Merge stored settings forward over current defaults and stamp the schema version. */

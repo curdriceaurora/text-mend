@@ -364,6 +364,32 @@ Requirements:
 6. All processing remains local (§5.12); the reader view introduces no new permissions and no remote fetches.
 7. Keyboard accessible and screen-reader navigable (§5.14 applies).
 
+### 5.25 Correction Memory (V2 — shipped)
+
+Remembers user corrections to repairs and replays them automatically when the same text
+reappears, on any site. Local-only, on by default, clearable. Full design:
+`docs/superpowers/specs/2026-06-09-correction-memory-design.md`.
+
+1. **Two correction types:** **override** (replace a segment with exact user text — or pin
+   the detector's current proposal) and **suppress** (never repair this segment). Captured
+   from the reader mark editor and the in-page preview panel, with immediate current-page
+   effect.
+2. **Content-addressed, exact-verified matching:** key = cyrb53 hash of the normalized
+   original text (a map index only); a record replays solely when its stored `original`
+   equals the incoming normalized text, so hash collisions can never mis-replace.
+3. **Precedence:** corrections beat detection and bypass the `autoNormalize` gate, but still
+   obey the structural in-place-safety rule (single text node → apply; link-spanning →
+   preview/copy in-page, full apply in reader view). Suppress always wins and is never
+   previewed.
+4. **Persistence:** per-record `storage.local` keys `corr:v1:<key>` (versioned namespace),
+   ≤ 1000 entries (LRU by `lastUsedAt`), `original`/`replacement` byte-capped, write failures
+   handled non-fatally. Pure core (`corrections.js`) is chrome/clock-free; the adapter
+   (`corrections-store.js`) is the only storage boundary.
+5. **Privacy:** local-only, never synced; no new permissions; `rememberCorrections` toggle
+   (default on) + "Clear all corrections (N)"; off disables capture and replay immediately.
+6. **Target:** Chrome MV3; all `chrome.*`/quota assumptions confined to the adapter for a
+   cheap future port.
+
 ---
 
 ## 6. Test Requirements
@@ -461,7 +487,9 @@ Define a **measurable false-positive bar**: e.g. ≤ N false reversals across th
 4. Punctuation canonicalization on copy/export.
 5. V1.5 fixtures + extended false-positive bar (§6.4, §6.6).
 
-**V2:** side-by-side original/repaired diff view · multi-page/live-blog stitching · site-specific extraction rules · user-correction memory (`storage.local`).
+**V2:**
+1. User-correction memory (§5.25) — **shipped.**
+2. Side-by-side original/repaired diff view · multi-page/live-blog stitching · site-specific extraction rules — roadmap.
 
 **Out / deferred indefinitely:** per-site auto mode · page-load auto-run · broad host permissions · in-place mutation across links/spans (superseded by reader view) · OCR/contextual reconstruction · LLM-based repair · non-English detection · PDF/image OCR · cipher/leetspeak repairs (§2.2.8).
 

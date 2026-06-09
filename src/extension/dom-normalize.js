@@ -3,7 +3,7 @@
 // the DOM. content.js wraps this with chrome messaging, the review panel, and clipboard.
 
 import { planNormalization } from '../core/engine.js';
-import { detectSegment } from '../core/detect.js';
+import { resolveSegment } from '../core/corrections.js';
 import { toPlainText } from '../core/extract.js';
 import { SETTINGS_DEFAULTS } from './settings.js';
 
@@ -71,49 +71,56 @@ export function createDomNormalizer({ window }) {
     node.nodeValue = decision.proposed;
   }
 
-  function scan({ apply = true, settings: override } = {}) {
+  function scan({ apply = true, settings: override, records = {} } = {}) {
     const settings = { ...SETTINGS_DEFAULTS, ...override };
     const units = collectUnits().slice(0, settings.maxNodes); // §5.15 scan-size guardrail
+    const resolve = (text, o) => resolveSegment(text, records, o);
     const plan = planNormalization(units, {
       threshold: settings.threshold,
       minLength: settings.minLength,
+      resolve,
     });
-    const doApply = apply && settings.autoNormalize;
     const preview = [];
+    const replayedKeys = [];
     let applied = 0;
     plan.forEach((decision, i) => {
-      if (decision.action === 'skip') return;
+      // A replayed correction (apply/preview/skip alike) gets its lastUsedAt bumped.
+      if (decision.source === 'correction' && decision.correctionKey) {
+        replayedKeys.push(decision.correctionKey);
+      }
+      if (decision.action === 'skip') return; // suppress hit, or nothing to do
       const unit = units[i];
+      // Corrections are explicit intent: they bypass the autoNormalize gate, but still obey
+      // the structural in-place-safety gate (single-node only; multi-node → preview).
+      const isCorrection = decision.source === 'correction';
+      const doApply = apply && (isCorrection || settings.autoNormalize);
       if (decision.action === 'apply' && unit.singleNode && doApply) {
         applyDecision(unit.node, decision);
         applied++;
       } else {
-        // Preview when: medium confidence, a multi-node/linked block (never auto-mutated),
-        // or a single-node apply suppressed because autoNormalize is off. singleNode tells
-        // the panel whether "Apply" can rewrite in place or should fall back to copy.
         preview.push({ node: unit.node, text: unit.text, singleNode: unit.singleNode, decision });
       }
     });
-    return { applied, preview, total: units.length };
+    return { applied, preview, total: units.length, replayedKeys };
   }
 
-  function normalizeSelection(selection, settings) {
+  function normalizeSelection(selection, settings, records = {}) {
     if (!selection || selection.isCollapsed || !selection.rangeCount) {
       return { applied: 0, preview: 0, total: 0 };
     }
     const text = selection.toString();
-    const det = detectSegment(text, settings);
-    if (det.mode === 'none') return { applied: 0, preview: 0, total: 1 };
+    const det = resolveSegment(text, records, settings);
+    if (det.mode === 'none') return { applied: 0, preview: 0, total: 1, correctionKey: det.correctionKey };
     const range = selection.getRangeAt(0);
     if (range.startContainer === range.endContainer && range.startContainer.nodeType === Node.TEXT_NODE) {
       const node = range.startContainer;
       undoStack.push({ node, original: node.nodeValue });
       node.nodeValue =
         node.nodeValue.slice(0, range.startOffset) + det.proposed + node.nodeValue.slice(range.endOffset);
-      return { applied: 1, preview: 0, total: 1 };
+      return { applied: 1, preview: 0, total: 1, correctionKey: det.correctionKey };
     }
     // Cross-node selection: hand back text for the caller to copy, don't mutate.
-    return { applied: 0, preview: 1, total: 1, copied: det.proposed };
+    return { applied: 0, preview: 1, total: 1, copied: det.proposed, correctionKey: det.correctionKey };
   }
 
   function undoAll() {
@@ -125,13 +132,14 @@ export function createDomNormalizer({ window }) {
     return { restored: count };
   }
 
-  function extractCleanedText(override) {
+  function extractCleanedText(override, records = {}) {
     const settings = { ...SETTINGS_DEFAULTS, ...override };
     const blocks = [];
     doc.body.querySelectorAll('h1,h2,h3,p,figcaption,li').forEach((el) => {
       const raw = el.textContent.trim();
       if (!raw) return;
-      const det = detectSegment(raw, { threshold: settings.threshold, minLength: settings.minLength });
+      // resolveSegment so a stored suppress/override is honored in copied text too.
+      const det = resolveSegment(raw, records, { threshold: settings.threshold, minLength: settings.minLength });
       const text = det.mode === 'none' ? raw : det.proposed;
       const type = /^H[1-3]$/.test(el.tagName)
         ? 'heading'

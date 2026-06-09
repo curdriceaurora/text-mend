@@ -35,6 +35,14 @@
       <label for="maxNodes">Maximum text nodes per scan</label>
       <input type="number" id="maxNodes" min="100" step="100" value="10000" />
     </div>
+    <div class="field">
+      <label for="rememberCorrections">Remember my corrections (local only)</label>
+      <input type="checkbox" id="rememberCorrections" checked />
+    </div>
+    <div class="field">
+      <label>Stored corrections: <span id="corrCount">0</span></label>
+      <button type="button" id="clearCorr">Clear all corrections</button>
+    </div>
     <p id="saved" role="status" aria-live="polite"></p>
     <script type="module" src="options.js"></script>
   </body>

@@ -1,5 +1,7 @@
-// Options page: reads/writes the shared, versioned settings schema (§5.11).
+// Options page: reads/writes the shared, versioned settings schema (§5.11) and manages the
+// local correction-memory store.
 import { SCHEMA_VERSION, SETTINGS_DEFAULTS, migrate } from './settings.js';
+import { createCorrectionsStore } from './corrections-store.js';
 
 const fields = {
   autoNormalize: { el: 'autoNormalize', prop: 'checked' },
@@ -7,7 +9,14 @@ const fields = {
   threshold: { el: 'threshold', prop: 'value', cast: Number },
   minLength: { el: 'minLength', prop: 'value', cast: Number },
   maxNodes: { el: 'maxNodes', prop: 'value', cast: Number },
+  rememberCorrections: { el: 'rememberCorrections', prop: 'checked' },
 };
+
+const corrections = createCorrectionsStore();
+
+async function refreshCount() {
+  document.getElementById('corrCount').textContent = String(await corrections.count());
+}
 
 async function load() {
   const settings = migrate(await chrome.storage.sync.get(SETTINGS_DEFAULTS));
@@ -28,5 +37,12 @@ async function save() {
   setTimeout(() => (saved.textContent = ''), 1500);
 }
 
-document.addEventListener('DOMContentLoaded', load);
+document.addEventListener('DOMContentLoaded', () => {
+  load();
+  refreshCount();
+  document.getElementById('clearCorr').addEventListener('click', async () => {
+    await corrections.clear();
+    await refreshCount();
+  });
+});
 document.querySelectorAll('input').forEach((input) => input.addEventListener('change', save));

@@ -1,5 +1,22 @@
 # TODO: Reversed Text Normalizer
 
+## V2 — correction memory (shipped)
+
+Spec `docs/superpowers/specs/2026-06-09-correction-memory-design.md`, plan
+`docs/superpowers/plans/2026-06-09-correction-memory.md`. Implemented TDD across 10 tasks:
+- [x] Pure `corrections.js` (keyFor/cyrb53, exact-verified lookup, resolveSegment, builders, eviction).
+- [x] `engine.js` injectable resolver + correction provenance on every decision (incl. skip).
+- [x] `corrections-store.js` adapter (per-record `corr:v1:` keys, caps, bump, clear; injectable area).
+- [x] `dom-normalize` + `reader` replay (chrome-free, records passed in; autoNormalize bypass; replayedKeys).
+- [x] settings `rememberCorrections` (schema v2) + options toggle/clear/count.
+- [x] `content.js` + `reader-page.js` capture UI (override/suppress, immediate effect) + bump.
+- [x] manifest WAR entry for `corrections-store.js` (caught by the static guard).
+- [x] Chrome e2e: real `storage.local` round-trip — override + suppress replay, `lastUsedAt` bump.
+- [x] requirements §5.25 + §9 updated.
+
+Result: **103 unit/integration + 4 Chrome e2e green.** Remaining V2 roadmap: diff view,
+site-specific rules, multi-page stitching.
+
 ## V1.5 — news reader (in progress)
 
 Per requirements §9 (V1.5) and §8.5 release criteria. Build order follows dependency, not priority: pure candidates → extraction → reader view → e2e.
