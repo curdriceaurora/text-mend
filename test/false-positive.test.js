@@ -22,3 +22,14 @@ test('normal article sentences are not normalized (false-positive bar)', () => {
     `false positives ${offenders.length}/${sentences.length} (bar ${FP_BAR}):\n${offenders.join('\n')}`,
   );
 });
+
+test('V1.5 candidates make ZERO changes on the clean corpus (§8.5.7 gate)', () => {
+  const offenders = [];
+  for (const sentence of sentences) {
+    const r = detectSegment(sentence, { unwrap: true });
+    if (r.applied.some((m) => ['strip', 'mojibake', 'unwrap'].includes(m))) {
+      offenders.push(`"${sentence}" -> ${r.applied.join('+')}`);
+    }
+  }
+  assert.equal(offenders.length, 0, `clean text altered by pre-repairs:\n${offenders.join('\n')}`);
+});

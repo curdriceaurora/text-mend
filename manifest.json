@@ -38,7 +38,12 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["src/core/*.js", "src/extension/content.js"],
+      "resources": [
+        "src/core/*.js",
+        "src/extension/content.js",
+        "src/extension/dom-normalize.js",
+        "src/extension/settings.js"
+      ],
       "matches": ["<all_urls>"]
     }
   ]

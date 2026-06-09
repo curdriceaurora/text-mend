@@ -1,4 +1,27 @@
-# TODO: Reversed Text Normalizer — V1
+# TODO: Reversed Text Normalizer
+
+## V1.5 — news reader (in progress)
+
+Per requirements §9 (V1.5) and §8.5 release criteria. Build order follows dependency, not priority: pure candidates → extraction → reader view → e2e.
+
+- [x] **A. Repair candidates (pure core, TDD)** — `strip`/`mojibake`/`unwrap`/`punct` + `repair.js` composer with §5.4.5 gates+tiers; integrated into `detect.js` (§5.19 step 4) as a gated pre-repair pass before reversal scoring (composed `applied` list, lowest-tier). Unwrap is opt-in (extraction/export only). `detect-score.js` extracted to share tokenization without a circular import.
+- [x] **B. News extraction (§5.8)** — `extract-article.js`: Readability-style container scoring (text mass, link density, ¶ count, class hints), byline/dateline split, photo-credit strip, boilerplate + footer exclusion, pull-quote dedup; jsdom-tested.
+- [x] **C. Reader view (§5.21)** — `reader.js` (pure builder: extract→repair→metadata+read-time) + `reader.html`/`reader-page.js` (themes, font size, repair marks w/ original on hover, copy + copy-Markdown). Entry points: popup "Open reader view" + context menu "Open in reader view" → background captures source, seeds `storage.session`, opens the reader tab.
+- [x] **D. Fixtures + FP gates (§6.4/§6.6)** — `fixtures/v15-news.html` (reversed/mojibake/zero-width/link-span/code/boilerplate). FP bar extended: strip/mojibake/unwrap make ZERO changes on the clean corpus (verified).
+- [x] **E. Chrome e2e regression** — `test/e2e/regression.e2e.mjs`: puppeteer-core loads the REAL packed extension into system Chrome (via `installExtension` over the debugging pipe; Chrome 149 removed `--load-extension`), asserts the SW is alive and the reader view repairs reversal/mojibake/zero-width/link-spanning text, excludes nav/ads/footer/credits/code, shows read time + marks, and does not canonicalize punctuation. `npm run test:all` → 76 unit/integration + 3 e2e, 0 failures.
+
+**Code-review pass (post-V1.5, 79 unit + 3 e2e passing):**
+- Important #1 — `extract-article.js` leaf-block logic double-counted paragraphs nested in `<li>`/`<blockquote>` (wrapper not skipped because it's itself a block). Simplified to `if (el.querySelector(BLOCK_SELECTOR)) continue;` (matches `dom-normalize`); added a nested-block regression test.
+- Important #2 — mojibake could silently delete a legitimate `Â` at auto-apply tier (nbsp entry) and fire on lone `Â°`/`Â£`. Dropped the nbsp entry; added `hasStrongArtifact` (â/Ã-led) gate so weak-only matches route to medium (preview), never auto-apply. Two regression tests.
+- Minor — `punct` glued-dash now letters-only (won't rewrite `x86--64`); repair `<mark>` gained an `aria-label` exposing the original to screen readers; `storage.session` reader payloads are swept on each open (leak guard); popup now routes reader-open through the background (single key scheme + sweep, removes duplicated capture logic).
+- Verdict was "merge with fixes"; all Important + the cheap Minors are addressed.
+
+**Notes / honest scope:**
+- Found & fixed a latent V1 bug: `dom-normalize.js`/`settings.js` were imported by the injected content script but missing from `web_accessible_resources` (the in-page flow would fail to load the module graph in real Chrome). Added them + a static guard (`test/manifest-war.test.js`) so it can't recur.
+- The in-page normalize/undo flow is **not** driven in the Chrome e2e: it's gated on a user gesture (toolbar click → activeTab) that headless puppeteer can't synthesize for an MV3 action popup. That path is covered by the jsdom integration suite + the WAR static guard. Reader view (the V1.5 headline) is fully exercised in real Chrome.
+- Reader view repairs link-spanning text at the block level; inline link anchors are rendered as plain text (links are not re-created in the owned surface). §5.21 item 2's "links re-rendered with repaired anchor text" is therefore partial — deferred as a refinement.
+
+# V1 (shipped)
 
 Implementation checklist derived from [requirements.md](../requirements.md).
 Ordered so each phase produces something testable before the next depends on it.

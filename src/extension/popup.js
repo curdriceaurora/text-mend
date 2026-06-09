@@ -68,6 +68,24 @@ function report(type, res) {
   }
 }
 
+async function openReader() {
+  const tab = await activeTab();
+  if (!tab?.id || RESTRICTED.test(tab.url ?? '')) {
+    setStatus('This page can’t be processed.');
+    return;
+  }
+  // Single implementation lives in the background (capture → sweep → storage → open tab).
+  try {
+    const res = await chrome.runtime.sendMessage({ type: 'open-reader' });
+    if (res?.ok) window.close();
+    else setStatus('Could not open reader view.');
+  } catch (err) {
+    setStatus('Could not open reader view.');
+    console.error(err);
+  }
+}
+
+document.getElementById('reader').addEventListener('click', openReader);
 document.getElementById('scan').addEventListener('click', () => send('scan'));
 document.getElementById('normalize').addEventListener('click', () => send('normalize-page'));
 document.getElementById('selection').addEventListener('click', () => send('normalize-selection'));

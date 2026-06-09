@@ -2,29 +2,20 @@
 // Scoring always compares ORIGINAL vs PROPOSED text, never "does the string look reversed".
 
 import { isWord } from './corpus.js';
-import { reverseGraphemes, fullReverse, reverseWords, splitToken } from './reverse.js';
+import { reverseGraphemes, fullReverse, reverseWords } from './reverse.js';
+import { tokenize, dictionaryCoverage } from './detect-score.js';
+import { preRepair } from './repair.js';
+
+export { dictionaryCoverage };
+
+const TIER_RANK = { high: 2, medium: 1, low: 0 };
+const lowestTier = (a, b) => (TIER_RANK[a] <= TIER_RANK[b] ? a : b);
 
 const MIN_SEGMENT_LENGTH = 20; // §5.11 default
 const DEFAULT_THRESHOLD = 0.75; // §5.11 default
 
 const URL_RE = /\bhttps?:\/\/|\bwww\.|\b\S+\.(com|org|net|io|gov|edu)\b/iu;
 const EMAIL_RE = /\b[^\s@]+@[^\s@]+\.[^\s@]+\b/u;
-
-/** Lowercase word cores extracted from text (punctuation stripped). */
-function tokenize(text) {
-  return text
-    .split(/\s+/u)
-    .map((t) => splitToken(t).core.toLowerCase())
-    .filter((t) => t.length > 0);
-}
-
-/** Fraction of tokens that are dictionary words. */
-export function dictionaryCoverage(text) {
-  const tokens = tokenize(text);
-  if (tokens.length === 0) return 0;
-  const hits = tokens.filter(isWord).length;
-  return hits / tokens.length;
-}
 
 /** Coherence proxy for n-gram score: fraction of adjacent token pairs both in-dictionary. */
 function bigramCoherence(text) {
@@ -116,38 +107,63 @@ export function shouldProcess(text, { minLength = MIN_SEGMENT_LENGTH } = {}) {
 }
 
 /**
- * Evaluate a text segment and return the best deterministic normalization.
- * Returns { mode: 'none'|'full'|'words', proposed, confidence, tier }.
+ * Evaluate a text segment and return the best deterministic normalization (§5.19 step 4):
+ * a gated pre-repair pass (strip → mojibake → unwrap, §5.4.5) produces the base text,
+ * then the reversal forms are scored on that base with the §5.3.6 formula.
+ *
+ * Returns { mode, applied, proposed, confidence, tier } where mode is 'none', a reversal
+ * mode ('full'|'words'), or 'repair' (pre-repairs only); applied lists every transform in
+ * composition order; tier is the LOWEST tier among composed components.
  */
-export function detectSegment(text, { threshold = DEFAULT_THRESHOLD, minLength } = {}) {
+export function detectSegment(text, { threshold = DEFAULT_THRESHOLD, minLength, unwrap = false } = {}) {
   if (!shouldProcess(text, { minLength })) {
-    return { mode: 'none', proposed: text, confidence: 0, tier: 'low' };
+    return { mode: 'none', applied: [], proposed: text, confidence: 0, tier: 'low' };
   }
 
+  const pre = preRepair(text, { unwrap });
+  const base = pre.text;
+  const preModes = pre.applied.map((a) => a.mode);
+
   const candidates = [
-    { mode: 'full', proposed: fullReverse(text) },
-    { mode: 'words', proposed: reverseWords(text) },
+    { mode: 'full', proposed: fullReverse(base) },
+    { mode: 'words', proposed: reverseWords(base) },
   ];
 
-  // Rank candidates by full confidence so word ORDER (punctuation/casing), not just
-  // dictionary coverage, decides between full-string and word-level reversal.
+  // Rank reversal candidates by full confidence so word ORDER (punctuation/casing), not
+  // just dictionary coverage, decides between full-string and word-level reversal.
   let best = null;
   let bestScore = -1;
   for (const c of candidates) {
-    if (c.proposed === text) continue;
-    const score = confidence(text, c.proposed);
+    if (c.proposed === base) continue;
+    const score = confidence(base, c.proposed);
     if (score > bestScore) {
       bestScore = score;
       best = c;
     }
   }
 
-  if (!best) return { mode: 'none', proposed: text, confidence: 0, tier: 'low' };
+  const reversalTier = best ? classify(bestScore, threshold) : 'low';
 
-  const conf = bestScore;
-  const tier = classify(conf, threshold);
-  if (tier === 'low') {
-    return { mode: 'none', proposed: text, confidence: conf, tier };
+  if (best && reversalTier !== 'low') {
+    return {
+      mode: best.mode,
+      applied: [...preModes, best.mode],
+      proposed: best.proposed,
+      confidence: bestScore,
+      tier: lowestTier(pre.tier, reversalTier),
+    };
   }
-  return { mode: best.mode, proposed: best.proposed, confidence: conf, tier };
+
+  if (preModes.length > 0) {
+    // Pre-repairs only: tiered by their §5.4.5 gates, not the reversal formula.
+    return {
+      mode: 'repair',
+      applied: preModes,
+      proposed: base,
+      confidence: pre.tier === 'high' ? 0.9 : 0.6,
+      tier: pre.tier,
+    };
+  }
+
+  return { mode: 'none', applied: [], proposed: text, confidence: best ? bestScore : 0, tier: 'low' };
 }

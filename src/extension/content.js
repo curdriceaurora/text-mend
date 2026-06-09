@@ -4,6 +4,7 @@
 
 import { createDomNormalizer } from './dom-normalize.js';
 import { loadSettings } from './settings.js';
+import { canonicalizePunctuation } from '../core/punct.js';
 
 const normalizer = createDomNormalizer({ window });
 let observer = null;
@@ -30,7 +31,9 @@ async function runSelection() {
 
 async function runCopyCleaned() {
   const settings = await getSettings();
-  const text = normalizer.extractCleanedText(settings);
+  // Punctuation canonicalization is export-only (§5.4.5 item 4): applied to copied text,
+  // never to the in-page DOM.
+  const text = canonicalizePunctuation(normalizer.extractCleanedText(settings));
   await navigator.clipboard?.writeText(text);
   return { copied: text.length };
 }
@@ -69,6 +72,10 @@ async function handle(message) {
       return { ok: true, ...normalizer.undoAll() };
     case 'copy-cleaned':
       return { ok: true, ...(await runCopyCleaned()) };
+    case 'capture-source':
+      // Read-only snapshot of the page for the reader view; the trusted caller
+      // (popup/background) persists it and opens the reader tab.
+      return { ok: true, html: document.documentElement.outerHTML, url: location.href };
     default:
       return { ok: false, error: 'unknown command' };
   }

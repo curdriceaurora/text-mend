@@ -5,11 +5,14 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "test": "node --test",
+    "test": "node --test test/*.test.js",
+    "test:e2e": "node --test test/e2e/*.e2e.mjs",
+    "test:all": "npm test && npm run test:e2e",
     "build:icons": "node tools/gen-icons.mjs"
   },
   "license": "MIT",
   "devDependencies": {
-    "jsdom": "^29.1.1"
+    "jsdom": "^29.1.1",
+    "puppeteer-core": "^25.1.0"
   }
 }

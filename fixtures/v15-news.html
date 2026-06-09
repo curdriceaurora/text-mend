@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>V1.5 regression fixture — mixed corruption news page</title>
+  </head>
+  <body>
+    <nav><a href="/">Home</a> <a href="/world">World</a> <a href="/sports">Sports</a> <a href="/sub">Subscribe</a></nav>
+    <article>
+      <h1>Turtle light fight still burns bright</h1>
+      <p class="byline">By Adam Van Brimmer | Updated 3:42 p.m. ET, June 8, 2025</p>
+
+      <!-- clean: must stay untouched -->
+      <p>Wildlife experts say the nighttime glow disrupts sea turtles during the nesting season along the coast.</p>
+
+      <!-- fully reversed single text node -->
+      <p>.melborp eht evlos lliw eW</p>
+
+      <!-- reversed text spanning an inline link: reader view repairs the text -->
+      <p>.melborp eht evlos <a href="https://example.com">lliw</a> eW</p>
+
+      <!-- mojibake (entities decode to the exact double-decode artifacts) -->
+      <p>It&acirc;&euro;&trade;s a problem we will solve over time, the experts said.</p>
+
+      <!-- zero-width characters injected (ZWSP + soft hyphen) -->
+      <p>The coun&#8203;ty said no fix is im&#173;minent for the lights at the interchange.</p>
+
+      <figure>
+        <img src="x.jpg" alt="" />
+        <figcaption>High mast lights at Exit 42. (AP Photo/Jane Smith)</figcaption>
+      </figure>
+
+      <aside class="related">Related stories: five more turtle articles you should read today now</aside>
+      <p>Advertisement</p>
+
+      <!-- code must never be reversed -->
+      <pre><code>const eht = reverse("dna");</code></pre>
+    </article>
+    <footer>Copyright 2025. All rights reserved. Subscribe to our newsletter.</footer>
+  </body>
+</html>

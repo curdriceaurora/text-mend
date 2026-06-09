@@ -16,19 +16,31 @@ Decision logic is pure and fully unit-tested; the extension is a thin DOM/UI ada
 | Normalization routing policy (§5.19, in-place safety) | `src/core/engine.js` | `test/engine.test.js` |
 | Duplicate removal | `src/core/dedupe.js` | `test/dedupe.test.js` |
 | Cleaned-article export (Markdown / plain) | `src/core/extract.js` | `test/extract.test.js` |
+| V1.5 repair candidates (strip, mojibake, unwrap, punct) + composer | `src/core/{strip,mojibake,unwrap,punct,repair}.js` | `test/repair.test.js`, `test/detect-compose.test.js` |
+| News extraction (container scoring, byline, credits, dedup) | `src/extension/extract-article.js` | `test/extract-article.test.js` (jsdom) |
+| Reader-view article builder | `src/extension/reader.js` | `test/reader.test.js` (jsdom) |
 | DOM adapter (scan, apply, undo, exclusions, extract) | `src/extension/dom-normalize.js` | `test/dom-normalize.test.js` (jsdom) |
-| False-positive bar on a normal-article corpus | `fixtures/normal-corpus.txt` | `test/false-positive.test.js` |
-| chrome wiring, review panel, popup, options, worker | `src/extension/content.js`, others | manual (browser) |
+| False-positive bar (clean corpus, all candidates) | `fixtures/normal-corpus.txt` | `test/false-positive.test.js` |
+| `web_accessible_resources` integrity | `manifest.json` | `test/manifest-war.test.js` |
+| Loads + reader view + repairs in real Chrome | whole packed extension | `test/e2e/regression.e2e.mjs` (puppeteer) |
+| chrome wiring, review panel, popup, options, worker | `src/extension/content.js`, others | jsdom + Chrome e2e |
 
 ## Run the tests
 
-Requires Node 18+ (built-in test runner + `Intl.Segmenter`). DOM tests use `jsdom`
-(the only dependency, dev-only).
+Requires Node 18+ (built-in test runner + `Intl.Segmenter`). DOM tests use `jsdom`;
+the Chrome regression suite uses `puppeteer-core` driving locally-installed Google Chrome
+(both dev-only).
 
 ```bash
-npm install   # installs jsdom for the DOM tests
-npm test      # 42 tests
+npm install        # jsdom + puppeteer-core
+npm test           # 76 unit + integration tests (fast, no browser)
+npm run test:e2e   # 3 Chrome regression tests (loads the real extension; needs Chrome)
+npm run test:all   # both
 ```
+
+The e2e suite stages a clean copy of the extension (`manifest.json`, `src/`, `icons/`) to a
+temp dir and loads it via Chrome's debugging pipe (`installExtension`) — Chrome 138+ removed
+the `--load-extension` switch. Override the browser with `CHROME_PATH=/path/to/chrome`.
 
 ## Load the extension (manual testing)
 
