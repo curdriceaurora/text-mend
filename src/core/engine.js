@@ -38,6 +38,9 @@ export function planNormalization(units, opts = {}) {
       // the surface needs it to bump lastUsedAt even when nothing visibly changed.
       source: det.source,
       correctionKey: det.correctionKey,
+      // Obfuscated/paywalled source — skipped, but the surface marks it so the user knows.
+      obfuscated: det.obfuscated,
+      reason: det.reason,
     };
   });
 }

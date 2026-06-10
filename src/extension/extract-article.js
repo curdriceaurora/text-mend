@@ -9,8 +9,47 @@ const BOILERPLATE_RE = /^(advertisement|related stories?:?|read more:?|sign up|s
 const FOOTER_RE = /(all rights reserved|©|copyright \d{4}|subscribe to our newsletter)/i;
 const CREDIT_RE = /\s*\((?:AP Photo|Photo|Getty|Reuters|AFP|Image)[^)]*\)\s*$|\s*\/\s*(Getty Images|Reuters|AFP|AP)\s*$/i;
 
+// Paywall / locked-content signals (hotfix point 2).
+const PAYWALL_CLASS_RE = /(^|[\s_-])(is-?paywalled|paywall|paygate|story-paygate_placeholder|metered|premium-locked|subscriber-only|locked-content|regwall)([\s_-]|$)/i;
+const BLUR_CLASS_RE = /(^|[\s_-])(blur|blurred|paywall-?blur|gradient-?blur|fade-?gradient|content-?fade|fade-?out)([\s_-]|$)/i;
+
+/**
+ * Rendered text of an element: prefer `innerText` (what's actually visible — respects
+ * display:none / visibility, unlike textContent which includes hidden decoy text often used
+ * on paywalled/obfuscated pages). Falls back to textContent when innerText is unavailable
+ * (e.g. jsdom) or blank.
+ */
+export function renderedText(el) {
+  const it = el.innerText;
+  if (typeof it === 'string' && it.trim().length > 0) return it;
+  return el.textContent || '';
+}
+
 function textOf(el) {
-  return (el.textContent || '').replace(/\s+/g, ' ').trim();
+  return renderedText(el).replace(/\s+/g, ' ').trim();
+}
+
+function classId(el) {
+  return `${el.className || ''} ${el.id || ''}`;
+}
+
+/** Detect paywall / locked-content placeholders (hotfix point 2). */
+export function detectPaywall(doc) {
+  // 1. JSON-LD isAccessibleForFree: false
+  for (const s of doc.querySelectorAll('script[type="application/ld+json"]')) {
+    if (/"isAccessibleForFree"\s*:\s*(false|"false")/i.test(s.textContent || '')) {
+      return { paywalled: true, reason: 'isAccessibleForFree' };
+    }
+  }
+  // 2. Paywall placeholder classes/ids
+  for (const el of doc.querySelectorAll('[class],[id]')) {
+    if (PAYWALL_CLASS_RE.test(classId(el))) return { paywalled: true, reason: 'placeholder' };
+  }
+  // 3. Blur / fade-gradient classes (visual paywall teaser)
+  for (const el of doc.querySelectorAll('[class]')) {
+    if (BLUR_CLASS_RE.test(el.className || '')) return { paywalled: true, reason: 'blur' };
+  }
+  return { paywalled: false, reason: null };
 }
 
 function linkDensity(el) {
@@ -111,5 +150,5 @@ export function extractArticle(doc, { stripCredits = true, dedupePullQuotes = tr
     blocks.push({ type: meta.type === 'quote' ? 'paragraph' : meta.type, level: meta.level, text });
   }
 
-  return { title, byline, date, blocks };
+  return { title, byline, date, blocks, paywalled: detectPaywall(doc).paywalled };
 }
