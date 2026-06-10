@@ -45,6 +45,14 @@ function blockEl(block) {
       mark.addEventListener('click', () => openEditor(block, el));
     }
     el.appendChild(mark);
+  } else if (block.obfuscated) {
+    // Do NOT present obfuscated/scrambled source as repaired — show it as-is, marked.
+    const span = document.createElement('span');
+    span.className = 'obfuscated';
+    setText(span, block.text);
+    span.title = 'Source appears obfuscated or paywalled — shown as-is, not repaired.';
+    span.setAttribute('aria-label', 'Source appears obfuscated or paywalled; shown unrepaired.');
+    el.appendChild(span);
   } else {
     setText(el, block.text);
   }
@@ -116,6 +124,19 @@ function render() {
     setText(p, 'No readable article content was found on this page.');
     main.appendChild(p);
     return;
+  }
+
+  if (article.paywalled || article.obfuscated) {
+    const banner = document.createElement('div');
+    banner.className = 'notice';
+    banner.setAttribute('role', 'note');
+    setText(
+      banner,
+      article.paywalled
+        ? 'This page appears to be paywalled or locked. The visible text is shown as-is — it may be incomplete and was not repaired.'
+        : 'Part of this page appears obfuscated or scrambled. Affected text is shown as-is, not repaired.',
+    );
+    main.appendChild(banner);
   }
 
   if (article.title) {

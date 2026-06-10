@@ -57,6 +57,27 @@ test('leaves clean paragraphs unchanged', () => {
   assert.deepEqual(p.modes, []);
 });
 
+test('marks an obfuscated block instead of presenting it as repaired', () => {
+  // A reversed stopword salad: un-reversing yields real words with no grammar.
+  const salad = 'the and of to in for with the and of to in for with the and of';
+  const reversedSalad = salad.split('').reverse().join('');
+  const article = buildReaderArticle(
+    doc(`<article><h1>T</h1><p>${reversedSalad}</p></article>`),
+  );
+  const p = article.blocks.find((b) => b.type === 'paragraph');
+  assert.equal(p.changed, false, 'not shown as repaired');
+  assert.equal(p.obfuscated, true);
+  assert.equal(p.text, reversedSalad, 'original left as-is');
+  assert.equal(article.obfuscated, true, 'article-level flag set');
+});
+
+test('surfaces the paywalled flag from extraction', () => {
+  const article = buildReaderArticle(
+    doc(`<article class="is-paywalled"><h1>Locked</h1><p>Subscribe to keep reading this story today.</p></article>`),
+  );
+  assert.equal(article.paywalled, true);
+});
+
 test('reports an estimated reading time', () => {
   const words = Array.from({ length: 400 }, () => 'word').join(' ');
   const article = buildReaderArticle(doc(`<article><h1>T</h1><p>${words}</p></article>`));

@@ -13,8 +13,18 @@ function repairBlock(text, records) {
   // unwrap enabled: reader text may carry visible hard wraps from extraction.
   const det = resolveSegment(text, records, { unwrap: true });
   if (det.mode === 'none') {
-    // Carry correctionKey even when unchanged (a suppress replay) so it can be bumped.
-    return { text, original: text, changed: false, modes: [], tier: 'high', correctionKey: det.correctionKey };
+    // Carry correctionKey even when unchanged (a suppress replay) so it can be bumped, and
+    // the obfuscated flag so the reader marks "source appears obfuscated" instead of repairing.
+    return {
+      text,
+      original: text,
+      changed: false,
+      modes: [],
+      tier: 'high',
+      correctionKey: det.correctionKey,
+      obfuscated: det.obfuscated || false,
+      reason: det.reason,
+    };
   }
   return {
     text: det.proposed,
@@ -31,9 +41,11 @@ export function buildReaderArticle(doc, opts = {}) {
   const extracted = extractArticle(doc, opts);
   let wordCount = 0;
   const replayedKeys = [];
+  let obfuscated = false;
   const blocks = extracted.blocks.map((b) => {
     const r = repairBlock(b.text, records);
     if (r.correctionKey) replayedKeys.push(r.correctionKey);
+    if (r.obfuscated) obfuscated = true;
     wordCount += r.text.split(/\s+/).filter(Boolean).length;
     return { type: b.type, level: b.level, ...r };
   });
@@ -44,5 +56,7 @@ export function buildReaderArticle(doc, opts = {}) {
     readingTimeMin: Math.max(1, Math.round(wordCount / WORDS_PER_MIN)),
     blocks,
     replayedKeys,
+    obfuscated,
+    paywalled: extracted.paywalled || false,
   };
 }
