@@ -207,6 +207,28 @@ test('reader fails closed on a paywalled + obfuscated page (banner shown, salad 
   await page.close();
 });
 
+test('reader degrades gracefully on a real-publisher paywalled page (NYT fixture)', async () => {
+  const html = readFileSync(new URL('../../fixtures/publishers/nytimes-paywalled.html', import.meta.url), 'utf8');
+  const key = 'reader-e2e-6';
+  await worker.evaluate(
+    async (kk, h) => chrome.storage.session.set({ [kk]: { html: h, url: 'https://www.nytimes.com/x' } }),
+    key,
+    html,
+  );
+  const page = await browser.newPage();
+  await page.goto(`chrome-extension://${extId}/src/extension/reader.html?key=${key}`, { waitUntil: 'load' });
+  await page.waitForSelector('main', { timeout: 10000 });
+  const out = await page.evaluate(() => ({
+    notice: document.querySelector('.notice')?.textContent ?? '',
+    body: document.querySelector('main')?.textContent ?? '',
+    repairedMarks: document.querySelectorAll('mark.repaired').length,
+  }));
+  assert.match(out.notice, /paywall|locked/i, 'paywall banner shown');
+  assert.match(out.body, /searched for a compromise/, 'the visible snippet is still shown (not blanked)');
+  assert.equal(out.repairedMarks, 0, 'nothing fabricated as a repair');
+  await page.close();
+});
+
 test('reader capture: "Don\'t repair this" reverts the text and persists a suppress', async () => {
   // Clear any prior corrections so this segment starts un-suppressed.
   await worker.evaluate(async () => {

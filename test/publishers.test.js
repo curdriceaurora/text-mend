@@ -58,3 +58,36 @@ test('usatoday-paywalled.html: scrambled decoy body is flagged obfuscated, not r
   assert.equal(article.obfuscated, true, 'reversed bag-of-words flagged, not presented as repaired');
   assert.equal(article.blocks.some((b) => b.changed), false, 'nothing shown as a clean repair');
 });
+
+// --- Graceful degradation: the WHOLE point — see a paywalled page and fail gracefully ---
+
+for (const file of PAYWALLED) {
+  test(`${file}: degrades gracefully — keeps visible text, fabricates nothing, never throws`, () => {
+    let article;
+    assert.doesNotThrow(() => {
+      article = buildReaderArticle(load(file));
+    });
+    assert.equal(article.paywalled, true, 'flagged so the reader shows the banner');
+    // Whatever snippet IS visible is preserved (we never blank the page)...
+    const hasVisibleText = article.blocks.some((b) => b.text.trim().length > 0);
+    assert.ok(hasVisibleText || article.blocks.length === 0, 'visible snippet kept when present');
+    // ...and we never present a confident "repair" of paywalled/decoy content.
+    const fabricatedRepair = article.blocks.some((b) => b.changed && !b.obfuscated);
+    assert.equal(fabricatedRepair, false, 'no fabricated repair of paywalled content');
+  });
+}
+
+test('a hard wall with no extractable body still returns a paywalled article (no crash, no empty lie)', () => {
+  const dom = new JSDOM(
+    `<!doctype html><html><body>
+       <script type="application/ld+json">{"@type":"NewsArticle","isAccessibleForFree":false}</script>
+       <div class="paywall"><p>Subscribe to read this article.</p></div>
+     </body></html>`,
+  );
+  let article;
+  assert.doesNotThrow(() => {
+    article = buildReaderArticle(dom.window.document);
+  });
+  assert.equal(article.paywalled, true, 'reader knows it is paywalled even with no body to show');
+  assert.equal(article.blocks.some((b) => b.changed), false, 'nothing fabricated');
+});
