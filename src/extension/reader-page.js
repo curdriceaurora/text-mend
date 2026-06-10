@@ -118,25 +118,34 @@ function render() {
   const main = document.getElementById('article');
   main.replaceChildren();
 
-  if (!article || (!article.title && article.blocks.length === 0)) {
-    const p = document.createElement('p');
-    p.id = 'empty';
-    setText(p, 'No readable article content was found on this page.');
-    main.appendChild(p);
-    return;
-  }
-
-  if (article.paywalled || article.obfuscated) {
+  // Banner first, so even a hard wall (no extractable body) explains itself gracefully
+  // instead of a bare "no content" message.
+  if (article && (article.paywalled || article.obfuscated)) {
     const banner = document.createElement('div');
     banner.className = 'notice';
     banner.setAttribute('role', 'note');
     setText(
       banner,
       article.paywalled
-        ? 'This page appears to be paywalled or locked. The visible text is shown as-is — it may be incomplete and was not repaired.'
+        ? 'This page appears to be paywalled or locked. Any visible text is shown as-is — it may be incomplete and was not repaired.'
         : 'Part of this page appears obfuscated or scrambled. Affected text is shown as-is, not repaired.',
     );
     main.appendChild(banner);
+  }
+
+  const empty = !article || (!article.title && article.blocks.length === 0);
+  if (empty) {
+    const p = document.createElement('p');
+    p.id = 'empty';
+    setText(
+      p,
+      article?.paywalled
+        ? 'There is no readable article text to show — the page appears to be behind a paywall.'
+        : 'No readable article content was found on this page.',
+    );
+    main.appendChild(p);
+    setText(document.getElementById('readtime'), '');
+    return;
   }
 
   if (article.title) {
