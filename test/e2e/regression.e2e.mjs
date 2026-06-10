@@ -179,6 +179,34 @@ test('correction memory replays an override + suppress from real storage.local a
   await page.close();
 });
 
+test('reader fails closed on a paywalled + obfuscated page (banner shown, salad not repaired)', async () => {
+  // Stopword salad reversed as a "source" — un-reversing yields real words, no grammar.
+  const salad = 'the and of to in for with the and of to in for with the and of';
+  const reversedSalad = salad.split('').reverse().join('');
+  const key = 'reader-e2e-5';
+  const html =
+    `<script type="application/ld+json">{"@type":"NewsArticle","isAccessibleForFree":false}</script>` +
+    `<article class="is-paywalled"><h1>Locked Story</h1><p>${reversedSalad}</p></article>`;
+  await worker.evaluate(
+    async (kk, h) => chrome.storage.session.set({ [kk]: { html: h, url: 'https://example.test/e' } }),
+    key,
+    html,
+  );
+
+  const page = await browser.newPage();
+  await page.goto(`chrome-extension://${extId}/src/extension/reader.html?key=${key}`, { waitUntil: 'load' });
+  await page.waitForSelector('main', { timeout: 10000 });
+
+  const out = await page.evaluate(() => ({
+    notice: document.querySelector('.notice')?.textContent ?? '',
+    obfuscatedMarks: document.querySelectorAll('.obfuscated').length,
+    repairedMarks: document.querySelectorAll('mark.repaired').length,
+  }));
+  assert.match(out.notice, /paywall|obfuscat/i, 'a paywall/obfuscation notice is shown');
+  assert.equal(out.repairedMarks, 0, 'salad is NOT presented as a repair');
+  await page.close();
+});
+
 test('reader capture: "Don\'t repair this" reverts the text and persists a suppress', async () => {
   // Clear any prior corrections so this segment starts un-suppressed.
   await worker.evaluate(async () => {
