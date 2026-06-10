@@ -9,8 +9,10 @@ const BOILERPLATE_RE = /^(advertisement|related stories?:?|read more:?|sign up|s
 const FOOTER_RE = /(all rights reserved|©|copyright \d{4}|subscribe to our newsletter)/i;
 const CREDIT_RE = /\s*\((?:AP Photo|Photo|Getty|Reuters|AFP|Image)[^)]*\)\s*$|\s*\/\s*(Getty Images|Reuters|AFP|AP)\s*$/i;
 
-// Paywall / locked-content signals (hotfix point 2).
-const PAYWALL_CLASS_RE = /(^|[\s_-])(is-?paywalled|paywall|paygate|story-paygate_placeholder|metered|premium-locked|subscriber-only|locked-content|regwall)([\s_-]|$)/i;
+// Paywall / locked-content signals (hotfix point 2). Includes generic markers plus
+// real platform classes: Gannett/USA Today (gnt_pr, roadblock), WSJ (snippet-promotion,
+// wsj-snippet), Piano/Arc — AJC (tp-modal, tp-backdrop), NYT (gateway-content).
+const PAYWALL_CLASS_RE = /(^|[\s_-])(is-?paywalled|paywall|paygate|story-paygate_placeholder|metered|premium-locked|subscriber-only|locked-content|regwall|roadblock|gnt[_-]pr|snippet-promotion|wsj-snippet|tp-modal|tp-backdrop|gateway-content)([\s_-]|$)/i;
 const BLUR_CLASS_RE = /(^|[\s_-])(blur|blurred|paywall-?blur|gradient-?blur|fade-?gradient|content-?fade|fade-?out)([\s_-]|$)/i;
 
 /**
