@@ -5,6 +5,7 @@ import { isWord } from './corpus.js';
 import { reverseGraphemes, fullReverse, reverseWords } from './reverse.js';
 import { tokenize, dictionaryCoverage } from './detect-score.js';
 import { preRepair } from './repair.js';
+import { looksObfuscated } from './obfuscation.js';
 
 export { dictionaryCoverage };
 
@@ -145,6 +146,13 @@ export function detectSegment(text, { threshold = DEFAULT_THRESHOLD, minLength, 
   const reversalTier = best ? classify(bestScore, threshold) : 'low';
 
   if (best && reversalTier !== 'low') {
+    // Fail closed: if the "repaired" text is actually scrambled/paywalled bag-of-words
+    // (real words, no grammar), do NOT present it as repaired — mark it obfuscated so the
+    // UI says "source appears obfuscated/paywalled" and leaves the original untouched.
+    const verdict = looksObfuscated(best.proposed);
+    if (verdict.obfuscated) {
+      return { mode: 'none', applied: [], proposed: text, confidence: bestScore, tier: 'low', obfuscated: true, reason: verdict.reason };
+    }
     return {
       mode: best.mode,
       applied: [...preModes, best.mode],
